@@ -1,5 +1,7 @@
 # docker-events-to-loki
 
+[![Build status](https://github.com/HerbCSO/docker-events-to-loki/actions/workflows/docker-publish.yml/badge.svg)](https://github.com/HerbCSO/docker-events-to-loki/actions/workflows/docker-publish.yml)
+
 Streams `docker events` from a host's Docker daemon into Loki, so events
 (container create/start/die/destroy, image pulls, network changes, etc.)
 become a queryable, persistent log stream instead of vanishing once they

@@ -5,8 +5,8 @@ Streams `docker events` from a host's Docker daemon into Loki, so events
 become a queryable, persistent log stream instead of vanishing once they
 age out of dockerd's in-memory 256-event buffer.
 
-Each event is pushed as its own log line (raw JSON from `docker events
---format '{{json .}}'`), labeled with:
+Each event is pushed as its own log line (the raw JSON read straight off
+the Docker Engine API's `/events` endpoint), labeled with:
 
 - `job=docker-events`
 - `host=<hostname>`
@@ -15,6 +15,12 @@ Each event is pushed as its own log line (raw JSON from `docker events
 
 Container name/image are left inside the JSON log line rather than used as
 labels, to avoid blowing up Loki's label cardinality.
+
+Implemented as a small Go program (standard library only - no docker-cli,
+curl or jq) that talks to the Docker daemon directly over its Unix socket.
+It compiles to a single static binary, and the image is `FROM scratch`:
+just that binary plus a CA bundle for HTTPS Loki endpoints, no shell, no
+package manager, no OS underneath.
 
 ## Build and run
 
@@ -60,12 +66,13 @@ and `X.Y.Z` / `X.Y` for `vX.Y.Z` tags.
 
 ## Config
 
-| Env var        | Default                                   | Purpose                                   |
-|----------------|--------------------------------------------|--------------------------------------------|
-| `LOKI_URL`     | `http://localhost:3100/loki/api/v1/push`   | Loki push endpoint                        |
-| `JOB_LABEL`    | `docker-events`                            | Loki `job` label                          |
-| `HOST_LABEL`   | output of `hostname` in the container      | Loki `host` label                         |
-| `RETRY_DELAY`  | `5`                                         | Seconds before reconnecting after the `docker events` stream ends |
+| Env var         | Default                                   | Purpose                                   |
+|-----------------|--------------------------------------------|--------------------------------------------|
+| `LOKI_URL`      | `http://localhost:3100/loki/api/v1/push`   | Loki push endpoint                        |
+| `JOB_LABEL`     | `docker-events`                            | Loki `job` label                          |
+| `HOST_LABEL`    | output of `hostname` in the container      | Loki `host` label                         |
+| `RETRY_DELAY`   | `5`                                         | Seconds before reconnecting after the events stream ends |
+| `DOCKER_SOCKET` | `/var/run/docker.sock`                     | Path to the Docker daemon's Unix socket   |
 
 Set `HOST_LABEL` explicitly (e.g. to the Docker host's real hostname) if
 you run this in a container, since otherwise it'll pick up the
@@ -82,12 +89,17 @@ container's own hostname/ID rather than the host's.
 ## Security note
 
 This container mounts `/var/run/docker.sock`, which is effectively root
-access to the host — anyone who can exec into this container can control
-every other container on the host. The mount here is `:ro`, which stops
-this script from writing to the socket, but the Docker API itself doesn't
-distinguish read/write at that layer for a client with any access at all
-in the way a filesystem does; treat this container as privileged and
-restrict who can reach it accordingly.
+access to the host — anyone who can reach that socket from inside the
+container can control every other container on the host. The mount here
+is `:ro`, which stops this program from writing to the socket, but the
+Docker API itself doesn't distinguish read/write at that layer for a
+client with any access at all in the way a filesystem does; treat this
+container as privileged and restrict who can reach it accordingly.
+
+The image has no shell and no other binaries (`FROM scratch`), so there's
+no `docker exec`-ing into it to reach the socket in the first place -
+compromising this container's own process (e.g. via a bug in the program
+or its dependencies) is the only route in.
 
 ## Caveat
 

@@ -1,1 +1,8 @@
 .claude/worktrees/
+
+# Real, deployment-specific compose file - copy compose-sample.yaml to
+# one of these and fill in your own LOKI_URL etc.
+docker-compose.yml
+docker-compose.yaml
+compose.yml
+compose.yaml

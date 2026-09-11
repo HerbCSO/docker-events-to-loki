@@ -1,0 +1,13 @@
+services:
+  docker-events-to-loki:
+    build: .
+    image: docker-events-to-loki:latest
+    container_name: docker-events-to-loki
+    restart: unless-stopped
+    environment:
+      LOKI_URL: "http://loki-host:3100/loki/api/v1/push"
+      JOB_LABEL: "docker-events"
+    volumes:
+      # Grants this container full control over the host's Docker daemon
+      # (equivalent to root on the host). Required to read `docker events`.
+      - /var/run/docker.sock:/var/run/docker.sock:ro

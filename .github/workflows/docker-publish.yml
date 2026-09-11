@@ -38,6 +38,32 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
+      - name: Build amd64 image for functional test
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          platforms: linux/amd64
+          load: true
+          tags: docker-events-to-loki:ci-test
+          cache-from: type=gha
+
+      - name: Verify HEALTHCHECK reports healthy
+        run: |
+          docker run -d --name hc-test \
+            -v /var/run/docker.sock:/var/run/docker.sock:ro \
+            docker-events-to-loki:ci-test
+          status=starting
+          for i in $(seq 1 45); do
+            status=$(docker inspect --format='{{.State.Health.Status}}' hc-test)
+            echo "check $i: $status"
+            [ "$status" = "healthy" ] && break
+            sleep 1
+          done
+          docker logs hc-test
+          docker inspect --format='{{json .State.Health}}' hc-test
+          docker rm -f hc-test
+          [ "$status" = "healthy" ]
+
   # Runs only for pushes to main / v* tags and manual dispatch. Scoped to
   # the "dockerhub" environment, whose deployment branch policy restricts
   # it to main and v* tags, and which holds the Docker Hub credentials -

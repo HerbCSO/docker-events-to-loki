@@ -15,6 +15,11 @@
 //	HOST_LABEL     Loki "host" label value (default: hostname)
 //	RETRY_DELAY    Seconds to wait before reconnecting after the events stream ends (default: 5)
 //	DOCKER_SOCKET  Path to the Docker daemon's Unix socket (default: /var/run/docker.sock)
+//
+// Run with a single "-healthcheck" argument to check liveness instead of
+// streaming: exits 0 if connected to the Docker events stream recently,
+// 1 otherwise. This doubles as the image's Docker HEALTHCHECK, since the
+// scratch image has no shell/curl/wget to run one any other way.
 package main
 
 import (
@@ -28,6 +33,20 @@ import (
 	"os"
 	"strconv"
 	"time"
+)
+
+const (
+	// healthFile is touched while connected to the Docker events stream,
+	// and read back by "-healthcheck". Scratch has no /tmp by default, so
+	// it's created at startup.
+	healthFile = "/tmp/health-ok"
+	// healthcheckInterval is how often the heartbeat is refreshed while
+	// connected, including on hosts with no events to report.
+	healthcheckInterval = 15 * time.Second
+	// healthMaxAge is how stale the heartbeat can be before "-healthcheck"
+	// reports unhealthy - a generous multiple of healthcheckInterval so a
+	// single missed tick under load doesn't flap the container's status.
+	healthMaxAge = 3 * healthcheckInterval
 )
 
 func getenv(key, def string) string {
@@ -48,7 +67,39 @@ type dockerEvent struct {
 	Action string `json:"Action"`
 }
 
+// runHealthcheck reports whether the heartbeat file was touched recently
+// enough to consider the process still connected to the Docker events
+// stream. Returns a process exit code (0 healthy, 1 unhealthy).
+func runHealthcheck() int {
+	info, err := os.Stat(healthFile)
+	if err != nil {
+		return 1
+	}
+	if time.Since(info.ModTime()) > healthMaxAge {
+		return 1
+	}
+	return 0
+}
+
+// touchHealthFile records that the process is currently connected to the
+// Docker events stream. Failures are logged but non-fatal - health
+// reporting is secondary to the actual event forwarding.
+func touchHealthFile() {
+	content := []byte(time.Now().UTC().Format(time.RFC3339) + "\n")
+	if err := os.WriteFile(healthFile, content, 0o644); err != nil {
+		logf("warn: failed to update health file: %v", err)
+	}
+}
+
 func main() {
+	if len(os.Args) > 1 && os.Args[1] == "-healthcheck" {
+		os.Exit(runHealthcheck())
+	}
+
+	if err := os.MkdirAll("/tmp", 0o755); err != nil {
+		logf("warn: failed to create /tmp for health file: %v", err)
+	}
+
 	lokiURL := getenv("LOKI_URL", "http://localhost:3100/loki/api/v1/push")
 	jobLabel := getenv("JOB_LABEL", "docker-events")
 	dockerSocket := getenv("DOCKER_SOCKET", "/var/run/docker.sock")
@@ -111,6 +162,26 @@ func streamDockerEvents(dockerClient, pushClient *http.Client, lokiURL, jobLabel
 		logf("error: docker events stream returned status %d: %s", resp.StatusCode, bytes.TrimSpace(body))
 		return
 	}
+
+	// Connected: mark healthy now, and keep refreshing on a timer for as
+	// long as the connection stays open - a quiet host with no events to
+	// report isn't unhealthy, so the heartbeat can't depend on events
+	// actually arriving.
+	touchHealthFile()
+	heartbeatCtx, stopHeartbeat := context.WithCancel(context.Background())
+	defer stopHeartbeat()
+	go func() {
+		ticker := time.NewTicker(healthcheckInterval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-heartbeatCtx.Done():
+				return
+			case <-ticker.C:
+				touchHealthFile()
+			}
+		}
+	}()
 
 	dec := json.NewDecoder(resp.Body)
 	for {

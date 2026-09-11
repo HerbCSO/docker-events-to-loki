@@ -92,6 +92,17 @@ Set `HOST_LABEL` explicitly (e.g. to the Docker host's real hostname) if
 you run this in a container, since otherwise it'll pick up the
 container's own hostname/ID rather than the host's.
 
+## Healthcheck
+
+The image has a `HEALTHCHECK` (visible in `docker ps`, and usable with
+`depends_on: condition: service_healthy` in Compose). Since the image is
+`FROM scratch` there's no shell/curl/wget to run one the usual way, so
+the binary checks itself: `docker-events-to-loki -healthcheck` reports
+healthy if it's connected to the Docker events stream (touched a
+heartbeat file within the last 45s - refreshed every 15s regardless of
+whether any events actually arrive, so a quiet host isn't mistaken for
+an unhealthy one).
+
 ## Querying in Loki / Grafana
 
 ```logql

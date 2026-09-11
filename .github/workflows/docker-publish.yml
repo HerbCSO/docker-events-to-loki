@@ -88,13 +88,21 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-  # Runs only after a successful publish from main (not from a tag push,
-  # so this can't retrigger itself). Auto-bumps a semver tag - patch by
-  # default, or minor/major if the triggering commit's SUBJECT LINE
-  # contains "[minor]"/"[major]" - and creates a matching GitHub release.
-  # Pushing the new vX.Y.Z tag re-triggers this workflow via the
-  # `tags: v*` trigger above, which is what produces the X.Y.Z / X.Y
-  # Docker Hub tags.
+  # Runs only after a successful publish from main. Computes the next
+  # semver - patch by default, or minor/major if the triggering commit's
+  # SUBJECT LINE contains "[minor]"/"[major]" - then:
+  #   1. re-tags the image `push` just published (by its sha-<commit> tag)
+  #      with the new X.Y.Z / X.Y Docker Hub tags, via `imagetools create`
+  #      (no rebuild - it just points new tags at the existing manifest)
+  #   2. pushes a matching vX.Y.Z git tag and creates a GitHub release
+  #
+  # Re-tagging directly like this (rather than pushing a vX.Y.Z tag and
+  # relying on the `tags: v*` trigger above to build it) is deliberate:
+  # a git push made with the default GITHUB_TOKEN does NOT trigger other
+  # workflow runs (GitHub suppresses that to prevent infinite loops), so
+  # a tag pushed from this job would otherwise just... sit there, with no
+  # X.Y.Z image ever actually published. The `tags: v*` trigger above
+  # still exists for someone manually pushing a version tag by hand.
   #
   # Deliberately checks only the subject line (%s), not the full message
   # body (%B): a commit whose body merely *mentions* "[major]" - e.g.
@@ -105,6 +113,7 @@ jobs:
     needs: [build, push]
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
+    environment: dockerhub
     permissions:
       contents: write
     steps:
@@ -113,7 +122,7 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Bump version and tag
+      - name: Compute next version
         id: bump
         run: |
           git fetch --tags --force
@@ -130,14 +139,37 @@ jobs:
           else
             patch=$((patch + 1))
           fi
-          new_tag="v${major}.${minor}.${patch}"
 
+          {
+            echo "new_tag=v${major}.${minor}.${patch}"
+            echo "semver=${major}.${minor}.${patch}"
+            echo "semver_minor=${major}.${minor}"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v4
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Tag published image with the new version
+        run: |
+          src="${{ secrets.DOCKERHUB_USERNAME }}/${{ env.IMAGE_NAME }}:sha-${{ github.sha }}"
+          docker buildx imagetools create \
+            --tag "${{ secrets.DOCKERHUB_USERNAME }}/${{ env.IMAGE_NAME }}:${{ steps.bump.outputs.semver }}" \
+            --tag "${{ secrets.DOCKERHUB_USERNAME }}/${{ env.IMAGE_NAME }}:${{ steps.bump.outputs.semver_minor }}" \
+            "$src"
+          docker buildx imagetools inspect "${{ secrets.DOCKERHUB_USERNAME }}/${{ env.IMAGE_NAME }}:${{ steps.bump.outputs.semver }}"
+
+      - name: Push git tag
+        run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git tag -a "$new_tag" -m "$new_tag"
-          git push origin "$new_tag"
-
-          echo "new_tag=$new_tag" >> "$GITHUB_OUTPUT"
+          git tag -a "${{ steps.bump.outputs.new_tag }}" -m "${{ steps.bump.outputs.new_tag }}"
+          git push origin "${{ steps.bump.outputs.new_tag }}"
 
       - name: Create GitHub release
         env:

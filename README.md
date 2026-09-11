@@ -54,14 +54,13 @@ docker run -d --name docker-events-to-loki \
   breakage early.
 - `push` runs only on pushes to `main`, `v*` tags, and manual dispatch,
   and pushes the built image to Docker Hub.
-- `version` runs only after a successful push to `main` (not on a tag
-  push, so it can't retrigger itself). It bumps a semver tag - patch by
-  default, or minor/major if the commit's *subject line* (not the full
-  message - avoids false positives from a body merely discussing this
-  convention) contains `[minor]`/`[major]` - and creates a matching
-  GitHub release. Pushing that new tag re-triggers this workflow via the
-  `v*` tag trigger, which is what publishes the `X.Y.Z`/`X.Y` Docker Hub
-  tags.
+- `version` runs only after a successful push to `main`. It computes the
+  next semver - patch by default, or minor/major if the commit's
+  *subject line* (not the full message - avoids false positives from a
+  body merely discussing this convention) contains `[minor]`/`[major]` -
+  re-tags the image `push` just published with the new `X.Y.Z`/`X.Y`
+  Docker Hub tags (via `docker buildx imagetools create`, no rebuild),
+  then pushes a matching `vX.Y.Z` git tag and creates a GitHub release.
 
 `push` is scoped to the `dockerhub` GitHub environment (Settings →
 Environments), which holds the credentials below and has a deployment

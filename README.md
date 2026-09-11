@@ -42,13 +42,19 @@ docker run -d --name docker-events-to-loki \
 
 ## CI / published image
 
-`.github/workflows/docker-publish.yml` has two jobs:
+`.github/workflows/docker-publish.yml` has three jobs:
 
 - `build` runs on every push, PR and manual trigger, and builds the image
   for `linux/amd64`/`linux/arm64` without pushing, to catch build
   breakage early.
 - `push` runs only on pushes to `main`, `v*` tags, and manual dispatch,
   and pushes the built image to Docker Hub.
+- `version` runs only after a successful push to `main` (not on a tag
+  push, so it can't retrigger itself). It bumps a semver tag - patch by
+  default, or minor/major if the commit message contains
+  `[minor]`/`[major]` - and creates a matching GitHub release. Pushing
+  that new tag re-triggers this workflow via the `v*` tag trigger, which
+  is what publishes the `X.Y.Z`/`X.Y` Docker Hub tags.
 
 `push` is scoped to the `dockerhub` GitHub environment (Settings →
 Environments), which holds the credentials below and has a deployment

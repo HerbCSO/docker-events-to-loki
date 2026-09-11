@@ -24,7 +24,12 @@ package manager, no OS underneath.
 
 ## Build and run
 
+Copy `compose-sample.yaml` to `docker-compose.yml` (gitignored, so your
+own `LOKI_URL` etc. stay local), fill in your Loki endpoint, then:
+
 ```sh
+cp compose-sample.yaml docker-compose.yml
+# edit docker-compose.yml: set LOKI_URL to your Loki instance
 docker compose up -d --build
 ```
 
@@ -36,7 +41,7 @@ docker build -t docker-events-to-loki .
 docker run -d --name docker-events-to-loki \
   --restart unless-stopped \
   -v /var/run/docker.sock:/var/run/docker.sock:ro \
-  -e LOKI_URL=http://10.17.0.25:3100/loki/api/v1/push \
+  -e LOKI_URL=http://loki-host:3100/loki/api/v1/push \
   docker-events-to-loki:latest
 ```
 

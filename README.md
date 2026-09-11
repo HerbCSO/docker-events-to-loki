@@ -24,7 +24,12 @@ package manager, no OS underneath.
 
 ## Build and run
 
+Copy `compose-sample.yaml` to `docker-compose.yml` (gitignored, so your
+own `LOKI_URL` etc. stay local), fill in your Loki endpoint, then:
+
 ```sh
+cp compose-sample.yaml docker-compose.yml
+# edit docker-compose.yml: set LOKI_URL to your Loki instance
 docker compose up -d --build
 ```
 

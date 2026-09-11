@@ -87,3 +87,55 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+  # Runs only after a successful publish from main (not from a tag push,
+  # so this can't retrigger itself). Auto-bumps a semver tag - patch by
+  # default, or minor/major if the triggering commit message contains
+  # "[minor]"/"[major]" - and creates a matching GitHub release. Pushing
+  # the new vX.Y.Z tag re-triggers this workflow via the `tags: v*`
+  # trigger above, which is what produces the X.Y.Z / X.Y Docker Hub tags.
+  version:
+    needs: [build, push]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Bump version and tag
+        id: bump
+        run: |
+          git fetch --tags --force
+          latest=$(git tag -l 'v*' --sort=-v:refname | head -n1)
+          latest="${latest:-v0.0.0}"
+          latest="${latest#v}"
+          IFS=. read -r major minor patch <<<"$latest"
+
+          msg=$(git log -1 --pretty=%B)
+          if grep -qiE '\[major\]' <<<"$msg"; then
+            major=$((major + 1)); minor=0; patch=0
+          elif grep -qiE '\[minor\]' <<<"$msg"; then
+            minor=$((minor + 1)); patch=0
+          else
+            patch=$((patch + 1))
+          fi
+          new_tag="v${major}.${minor}.${patch}"
+
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git tag -a "$new_tag" -m "$new_tag"
+          git push origin "$new_tag"
+
+          echo "new_tag=$new_tag" >> "$GITHUB_OUTPUT"
+
+      - name: Create GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${{ steps.bump.outputs.new_tag }}" \
+            --title "${{ steps.bump.outputs.new_tag }}" \
+            --generate-notes

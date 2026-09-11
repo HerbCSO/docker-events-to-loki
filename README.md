@@ -36,17 +36,23 @@ docker run -d --name docker-events-to-loki \
 
 ## CI / published image
 
-`.github/workflows/docker-publish.yml` builds the image for `linux/amd64`
-and `linux/arm64` and pushes it to Docker Hub on every push to `main` and
-on `v*` tags. Pull requests are built but not pushed.
+`.github/workflows/docker-publish.yml` has two jobs:
 
-Two repository secrets are required (Settings → Secrets and variables →
-Actions):
+- `build` runs on every push, PR and manual trigger, and builds the image
+  for `linux/amd64`/`linux/arm64` without pushing, to catch build
+  breakage early.
+- `push` runs only on pushes to `main`, `v*` tags, and manual dispatch,
+  and pushes the built image to Docker Hub.
 
-| Secret               | Value                                                      |
-|----------------------|------------------------------------------------------------|
+`push` is scoped to the `dockerhub` GitHub environment (Settings →
+Environments), which holds the credentials below and has a deployment
+branch policy limited to `main` and `v*` tags — so the token can't be
+reached from an arbitrary branch or a PR, even via manual dispatch.
+
+| Environment secret   | Value                                                      |
+|-----------------------|-------------------------------------------------------------|
 | `DOCKERHUB_USERNAME` | Docker Hub account/namespace the image is pushed under     |
-| `DOCKERHUB_TOKEN`    | Docker Hub access token with Read & Write scope            |
+| `DOCKERHUB_TOKEN`    | Docker Hub access token with Read & Write scope             |
 
 The image is published as `<DOCKERHUB_USERNAME>/docker-events-to-loki`,
 tagged `latest` (default branch), the branch name, the full commit SHA,

@@ -16,4 +16,10 @@ FROM scratch
 COPY --from=builder /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
 COPY --from=builder /out/docker-events-to-loki /usr/local/bin/docker-events-to-loki
 
+# Exec form, not shell form - there's no /bin/sh to run a shell-form CMD in
+# this image. The binary checks its own heartbeat file; see "-healthcheck"
+# in main.go.
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+  CMD ["/usr/local/bin/docker-events-to-loki", "-healthcheck"]
+
 ENTRYPOINT ["/usr/local/bin/docker-events-to-loki"]

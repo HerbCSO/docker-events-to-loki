@@ -90,10 +90,17 @@ jobs:
 
   # Runs only after a successful publish from main (not from a tag push,
   # so this can't retrigger itself). Auto-bumps a semver tag - patch by
-  # default, or minor/major if the triggering commit message contains
-  # "[minor]"/"[major]" - and creates a matching GitHub release. Pushing
-  # the new vX.Y.Z tag re-triggers this workflow via the `tags: v*`
-  # trigger above, which is what produces the X.Y.Z / X.Y Docker Hub tags.
+  # default, or minor/major if the triggering commit's SUBJECT LINE
+  # contains "[minor]"/"[major]" - and creates a matching GitHub release.
+  # Pushing the new vX.Y.Z tag re-triggers this workflow via the
+  # `tags: v*` trigger above, which is what produces the X.Y.Z / X.Y
+  # Docker Hub tags.
+  #
+  # Deliberately checks only the subject line (%s), not the full message
+  # body (%B): a commit whose body merely *mentions* "[major]" - e.g.
+  # explaining this very convention - would otherwise trigger a bogus
+  # bump. (This happened: the commit that introduced this job described
+  # "[major]" in its body and bumped itself straight to v1.0.0.)
   version:
     needs: [build, push]
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
@@ -115,7 +122,7 @@ jobs:
           latest="${latest#v}"
           IFS=. read -r major minor patch <<<"$latest"
 
-          msg=$(git log -1 --pretty=%B)
+          msg=$(git log -1 --pretty=%s)
           if grep -qiE '\[major\]' <<<"$msg"; then
             major=$((major + 1)); minor=0; patch=0
           elif grep -qiE '\[minor\]' <<<"$msg"; then

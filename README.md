@@ -56,10 +56,12 @@ docker run -d --name docker-events-to-loki \
   and pushes the built image to Docker Hub.
 - `version` runs only after a successful push to `main` (not on a tag
   push, so it can't retrigger itself). It bumps a semver tag - patch by
-  default, or minor/major if the commit message contains
-  `[minor]`/`[major]` - and creates a matching GitHub release. Pushing
-  that new tag re-triggers this workflow via the `v*` tag trigger, which
-  is what publishes the `X.Y.Z`/`X.Y` Docker Hub tags.
+  default, or minor/major if the commit's *subject line* (not the full
+  message - avoids false positives from a body merely discussing this
+  convention) contains `[minor]`/`[major]` - and creates a matching
+  GitHub release. Pushing that new tag re-triggers this workflow via the
+  `v*` tag trigger, which is what publishes the `X.Y.Z`/`X.Y` Docker Hub
+  tags.
 
 `push` is scoped to the `dockerhub` GitHub environment (Settings →
 Environments), which holds the credentials below and has a deployment

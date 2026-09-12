@@ -47,6 +47,28 @@ docker run -d --name docker-events-to-loki \
   docker-events-to-loki:latest
 ```
 
+## Plain binary (no Docker required to run it)
+
+Every release also publishes the plain, statically-linked binary
+(`linux/amd64` and `linux/arm64`) as a download on its [GitHub
+release](https://github.com/HerbCSO/docker-events-to-loki/releases) —
+same build the Docker image ships, just without the container. Useful
+if you'd rather run it directly (e.g. as a systemd service) than add
+another container:
+
+```sh
+curl -LO https://github.com/HerbCSO/docker-events-to-loki/releases/latest/download/docker-events-to-loki-linux-amd64
+chmod +x docker-events-to-loki-linux-amd64
+
+LOKI_URL=http://loki-host:3100/loki/api/v1/push ./docker-events-to-loki-linux-amd64
+```
+
+All the [env vars](#config) apply the same way. It still needs access
+to `/var/run/docker.sock` - running on the bare host, that's just the
+real socket file, so no volume mount is involved; whoever runs the
+binary needs read access to it (e.g. membership in the host's `docker`
+group). A `SHA256SUMS` file is published alongside the binaries.
+
 ## CI / published image
 
 `.github/workflows/docker-publish.yml` has three jobs:
@@ -62,7 +84,10 @@ docker run -d --name docker-events-to-loki \
   body merely discussing this convention) contains `[minor]`/`[major]` -
   re-tags the image `push` just published with the new `X.Y.Z`/`X.Y`
   Docker Hub tags (via `docker buildx imagetools create`, no rebuild),
-  then pushes a matching `vX.Y.Z` git tag and creates a GitHub release.
+  builds the plain `linux/amd64`/`linux/arm64` binaries from the same
+  Dockerfile stage the image uses, then pushes a matching `vX.Y.Z` git
+  tag and creates a GitHub release with those binaries (plus a
+  `SHA256SUMS`) attached.
 
 `push` is scoped to the `dockerhub` GitHub environment (Settings →
 Environments), which holds the credentials below and has a deployment

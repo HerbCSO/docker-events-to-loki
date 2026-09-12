@@ -64,6 +64,18 @@ jobs:
           docker rm -f hc-test
           [ "$status" = "healthy" ]
 
+      # Exercises the exact command the `version` job uses to publish
+      # release binaries, so a mistake here (e.g. the local exporter's
+      # per-platform output paths) is caught on the PR, not only after
+      # merging to main - `version` only runs on a real push to main, so
+      # it never gets a chance to fail a PR check.
+      - name: Verify release-binary build works
+        run: |
+          docker buildx build --target binary --platform linux/amd64,linux/arm64 \
+            -o type=local,dest=dist-test --cache-from type=gha .
+          ls -l dist-test/linux_amd64/docker-events-to-loki dist-test/linux_arm64/docker-events-to-loki
+          file dist-test/linux_amd64/docker-events-to-loki dist-test/linux_arm64/docker-events-to-loki
+
   # Runs only for pushes to main / v* tags and manual dispatch. Scoped to
   # the "dockerhub" environment, whose deployment branch policy restricts
   # it to main and v* tags, and which holds the Docker Hub credentials -
@@ -172,6 +184,9 @@ jobs:
             echo "semver_minor=${major}.${minor}"
           } >> "$GITHUB_OUTPUT"
 
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v4
+
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v4
 
@@ -190,6 +205,22 @@ jobs:
             "$src"
           docker buildx imagetools inspect "${{ secrets.DOCKERHUB_USERNAME }}/${{ env.IMAGE_NAME }}:${{ steps.bump.outputs.semver }}"
 
+      # Extracts the same "binary" stage the image is built from (see the
+      # Dockerfile), for linux/amd64 and linux/arm64, so the plain binary
+      # is available as a release download alongside the Docker image -
+      # same build recipe and pinned Go version either way, not a
+      # second, separately-maintained build path.
+      - name: Build release binaries
+        run: |
+          docker buildx build --target binary --platform linux/amd64,linux/arm64 \
+            -o type=local,dest=dist --cache-from type=gha .
+
+          mkdir -p release-assets
+          cp dist/linux_amd64/docker-events-to-loki release-assets/docker-events-to-loki-linux-amd64
+          cp dist/linux_arm64/docker-events-to-loki release-assets/docker-events-to-loki-linux-arm64
+          (cd release-assets && sha256sum -- * > SHA256SUMS)
+          ls -l release-assets
+
       - name: Push git tag
         run: |
           git config user.name "github-actions[bot]"
@@ -203,4 +234,5 @@ jobs:
         run: |
           gh release create "${{ steps.bump.outputs.new_tag }}" \
             --title "${{ steps.bump.outputs.new_tag }}" \
-            --generate-notes
+            --generate-notes \
+            release-assets/*

@@ -11,7 +11,7 @@ Each event is pushed as its own log line (the raw JSON read straight off
 the Docker Engine API's `/events` endpoint), labeled with:
 
 - `job=docker-events`
-- `host=<hostname>`
+- `host=<Docker host's hostname>`
 - `type=<event type>` (container, image, network, volume, ...)
 - `action=<event action>` (create, start, die, destroy, ...)
 
@@ -109,13 +109,18 @@ and `X.Y.Z` / `X.Y` for `vX.Y.Z` tags.
 |-----------------|--------------------------------------------|--------------------------------------------|
 | `LOKI_URL`      | `http://localhost:3100/loki/api/v1/push`   | Loki push endpoint                        |
 | `JOB_LABEL`     | `docker-events`                            | Loki `job` label                          |
-| `HOST_LABEL`    | output of `hostname` in the container      | Loki `host` label                         |
+| `HOST_LABEL`    | Docker daemon's hostname (see below)       | Loki `host` label                         |
 | `RETRY_DELAY`   | `5`                                         | Seconds before reconnecting after the events stream ends |
 | `DOCKER_SOCKET` | `/var/run/docker.sock`                     | Path to the Docker daemon's Unix socket   |
 
-Set `HOST_LABEL` explicitly (e.g. to the Docker host's real hostname) if
-you run this in a container, since otherwise it'll pick up the
-container's own hostname/ID rather than the host's.
+If `HOST_LABEL` isn't set, the `host` label is the name of the machine
+the Docker daemon runs on, as reported by the daemon's `/info` endpoint
+(re-checked on every reconnect) - so it's the real server name even when
+running in a container, where the container's own hostname would just be
+its ID. If `/info` fails or reports no name, it falls back to the
+process's own hostname. On Docker Desktop (Mac/Windows) the daemon
+reports `docker-desktop`, the name of its VM; set `HOST_LABEL` if you
+want something else.
 
 ## Healthcheck
 

@@ -12,7 +12,8 @@
 //
 //	LOKI_URL       Loki push endpoint (default: http://localhost:3100/loki/api/v1/push)
 //	JOB_LABEL      Loki "job" label value (default: docker-events)
-//	HOST_LABEL     Loki "host" label value (default: hostname)
+//	HOST_LABEL     Loki "host" label value (default: the Docker daemon's
+//	               hostname from /info, falling back to this process's hostname)
 //	RETRY_DELAY    Seconds to wait before reconnecting after the events stream ends (default: 5)
 //	DOCKER_SOCKET  Path to the Docker daemon's Unix socket (default: /var/run/docker.sock)
 //
@@ -104,14 +105,7 @@ func main() {
 	jobLabel := getenv("JOB_LABEL", "docker-events")
 	dockerSocket := getenv("DOCKER_SOCKET", "/var/run/docker.sock")
 
-	hostLabel := os.Getenv("HOST_LABEL")
-	if hostLabel == "" {
-		h, err := os.Hostname()
-		if err != nil {
-			h = "unknown"
-		}
-		hostLabel = h
-	}
+	hostOverride := os.Getenv("HOST_LABEL")
 
 	retryDelay := 5 * time.Second
 	if v := os.Getenv("RETRY_DELAY"); v != "" {
@@ -132,13 +126,64 @@ func main() {
 	}
 	pushClient := &http.Client{Timeout: 10 * time.Second}
 
-	logf("forwarding docker events to %s (job=%s, host=%s)", lokiURL, jobLabel, hostLabel)
-
 	for {
+		hostLabel := hostOverride
+		if hostLabel == "" {
+			hostLabel = dockerHostname(dockerClient)
+		}
+		logf("forwarding docker events to %s (job=%s, host=%s)", lokiURL, jobLabel, hostLabel)
 		streamDockerEvents(dockerClient, pushClient, lokiURL, jobLabel, hostLabel)
 		logf("docker events stream ended, reconnecting in %s", retryDelay)
 		time.Sleep(retryDelay)
 	}
+}
+
+// dockerHostname returns the hostname of the machine the Docker daemon runs
+// on, as reported by its /info endpoint. Inside a container os.Hostname()
+// is just the container's ID, so this is the only config-free way to label
+// events with the actual Docker host. Falls back to os.Hostname() (then
+// "unknown") if the daemon can't be asked or doesn't report a name.
+func dockerHostname(dockerClient *http.Client) string {
+	name, err := fetchDockerInfoName(dockerClient)
+	if err == nil && name != "" {
+		return name
+	}
+	if err != nil {
+		logf("warn: failed to get docker host name from /info, using local hostname: %v", err)
+	} else {
+		logf("warn: docker /info reported no host name, using local hostname")
+	}
+	h, err := os.Hostname()
+	if err != nil {
+		return "unknown"
+	}
+	return h
+}
+
+// fetchDockerInfoName asks the Docker daemon's /info endpoint for its Name.
+func fetchDockerInfoName(dockerClient *http.Client) (string, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "http://docker/info", nil)
+	if err != nil {
+		return "", err
+	}
+	resp, err := dockerClient.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return "", fmt.Errorf("status %d: %s", resp.StatusCode, bytes.TrimSpace(body))
+	}
+	var info struct {
+		Name string `json:"Name"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&info); err != nil {
+		return "", fmt.Errorf("decoding response: %w", err)
+	}
+	return info.Name, nil
 }
 
 // streamDockerEvents connects to the Docker daemon's /events endpoint and
